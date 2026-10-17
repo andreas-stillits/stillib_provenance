@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stillib_provenance"
+version = "0.1.0"
+description = "A config and provenance management utility build on Pydantic"
+readme = "README.md"
+requires-python = ">=3.12"
+
+license = "MIT"
+license-files = ["LICENSE"]
+
+authors = [
+  { name = "Andreas Stillits", email = "andreas.stillits@gmail.com" }
+]
+
+dependencies = [
+
+]
+
+[project.scripts]
+stillib_provenance = "stillib_provenance.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "ruff",
+  "mypy",
+  "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = false
+
+[tool.setuptools.package-data]
+stillib_provenance = ["templates/*.txt"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E", # code style (indentation, whitepspace, linebreaks, etc.)
+    "F", # correctness (undefined names, unused imports, etc.)
+    "I", # import sorting (alphabetical, type, first-party/third-party, etc.)
+    "B", # bugbear (potential bugs, e.g., bare except, etc.)
+    "UP", # update style (suggest newer syntax for target-version)
+    "SIM", # simplify (complex expressions, nested statements, etc.)
+    "EM", # exceptions (messsage style, etc.)
+    "PIE", # quality of life rules
+
+]
+
+fixable = ["ALL"] # what is ruff allowed to auto-fix
+ignore = ["EM101", "EM102", "E501", "F401"] # F401 removes unused imports. Remove if wanted
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
