@@ -1,0 +1,39 @@
+""" 
+Example config.py file based on Pydantic 2.
+
+
+- Any Config class inherits from Pydantic's regular BaseModel class.
+
+- Parameters can be declared using regular light weight type hinting or
+  for a more comprehensive definition and additional constraints on valid inputs
+  using the Field class - see examples
+
+A project can have several config classes for different facets.
+These can be declared separately or alternatively nested into each other.
+
+"""
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+# Example config class
+class Config(BaseModel):
+    
+    # define config behavior - always apply
+    #   extra="forbid" : parsing additional parameters dynamically is not allowed. congfig.py is the single source of truth
+    #   frozen=True    : config parameters cannot be changed using attribute access. Use update_config() to apply changes
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    diffusivity: float = Field(
+        1.0,
+        gt=0,
+        description="Diffusion coefficient [µm²/s]"
+    )
+
+    n_steps: int = Field(
+        1000,
+        ge=1,
+        description="Number of simulation steps"
+    )
+
+    mesh: Path = Path("data/mesh.msh")

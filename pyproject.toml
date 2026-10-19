@@ -17,7 +17,7 @@ authors = [
 ]
 
 dependencies = [
-
+  "pydantic>=2.0.0",
 ]
 
 [project.scripts]
@@ -29,13 +29,14 @@ dev = [
   "mypy",
   "pytest",
 ]
+# consider adding stillib_paths as an optional dependency for quick dual installation
 
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = false
 
 [tool.setuptools.package-data]
-stillib_provenance = ["templates/*.txt"]
+stillib_provenance = ["templates/*.txt"] # specify template files shipped with this package.
 
 [tool.ruff]
 line-length = 88
