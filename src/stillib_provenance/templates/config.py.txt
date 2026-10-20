@@ -20,9 +20,10 @@ from pydantic import BaseModel, ConfigDict, Field
 class Config(BaseModel):
     
     # define config behavior - always include this line
-    #   extra="forbid" : parsing additional parameters dynamically is not allowed. congfig.py is the single source of truth
-    #   frozen=True    : config parameters cannot be changed using attribute access. Use update_config() to apply changes
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    #   extra="forbid"        : parsing additional parameters dynamically is not allowed. congfig.py is the single source of truth
+    #   frozen=True           : config parameters cannot be changed using attribute access. Use update_config() to apply changes with validation
+    #   validate_default=True : also validate the default values typed directly into the project config.py
+    model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True)
 
 
     # Examples of minimal declaration
