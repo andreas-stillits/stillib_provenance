@@ -52,6 +52,6 @@ class Config(BaseModel):
     )
 
     principal_direction: tuple[float, float, float] = Field(
-        (0.0, 0.0, 1.0)
+        (0.0, 0.0, 1.0),
         description = "Define main coordinate system axis - defaults to the cartesian z-coordinate"
     )
