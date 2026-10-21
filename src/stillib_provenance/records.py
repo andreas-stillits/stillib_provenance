@@ -164,7 +164,6 @@ class Record:
             self._error = {
                 "type": "MissingOutputs",
                 "message": message,
-                "missing_outputs": missing_outputs,
             }
             self._save_provenance()
             raise FileNotFoundError(message)
