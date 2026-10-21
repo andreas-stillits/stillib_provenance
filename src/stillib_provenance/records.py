@@ -4,6 +4,7 @@ import json
 from collections.abc import Mapping
 from os import PathLike
 from pathlib import Path
+from typing import Self
 
 from pydantic import BaseModel
 
@@ -13,10 +14,14 @@ PathArg = str | PathLike[str]  # versatile user input type for paths
 # --------------------------------------------
 RECORD_SCHEMA_VERSION: str = "1.0"
 
-RECORD_STATUS_RUNNING: str = "running"
-RECORD_STATUS_FINISHED: str = "finished"
-RECORD_STATUS_INCOMPLETE: str = "incomplete"
-RECORD_STATUS_FAILED: str = "failed"
+RECORD_STATUS_RUNNING: str = (
+    "running"  # all declared input files are present, config is serializable
+)
+RECORD_STATUS_FINISHED: str = (
+    "finished"  # all declared outputs files are present (OBS: presence does not imply content)
+)
+RECORD_STATUS_INCOMPLETE: str = "incomplete"  # some declared outputs are not present
+RECORD_STATUS_FAILED: str = "failed"  # 'something' raised any exception
 
 RECORD_DIRECTORY_NAME: str = "record"
 
@@ -89,7 +94,6 @@ class Record:
             file.write(config_json + "\n")
 
         self._save_provenance()
-        return
 
     def _save_provenance(self) -> None:
         provenance = {
@@ -147,7 +151,6 @@ class Record:
 
         # update the written record
         self._save_provenance()
-        return
 
     def finish(
         self,
@@ -171,8 +174,6 @@ class Record:
             self.status = RECORD_STATUS_FINISHED
             self._save_provenance()
 
-        return
-
     def fail(self, exception=None) -> None:
         self._ensure_running()
 
@@ -185,11 +186,10 @@ class Record:
             }
 
         self._save_provenance()
-        return
 
     # Context manager support for the Record class, i.e. automatic cleanup without explicit finish/fail calls.
 
-    def __enter__(self) -> Record:
+    def __enter__(self) -> Self:
         self._ensure_running()
         return self
 
@@ -210,7 +210,8 @@ def start_record(
     inputs: Mapping[str, PathArg] | None = None,
     outputs: Mapping[str, PathArg] | None = None,
 ) -> Record:
-    """Wrapper initializing a Record instance"""
+    """Factory initializing a Record instance"""
+    # later potentially inspect metadata first ...
     return Record(
         config,
         directory=directory,
