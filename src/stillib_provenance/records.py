@@ -80,7 +80,7 @@ class Record:
         #   non-existence of a previous record
         # then we can safely initialize the record directory and write the initial files.
         self.status: str = RECORD_STATUS_RUNNING
-        self._error_type: str | None = None
+        self._error: dict | None = None
 
         # Create the record directory and write the initial files
         self.record_root.mkdir(parents=True, exist_ok=True)
@@ -99,8 +99,8 @@ class Record:
             "outputs": {name: str(path) for name, path in self._outputs.items()},
         }
 
-        if self._error_type is not None:
-            provenance["error_type"] = self._error_type
+        if self._error is not None:
+            provenance["error"] = self._error
 
         # Write to a temporary file first to avoid partial writes, then atomically replace with the final file
         temp_file_name = PROVENANCE_FILE_NAME + ".tmp"
@@ -158,16 +158,19 @@ class Record:
             name for name, path in self._outputs.items() if not path.exists()
         ]
 
-        self.status = (
-            RECORD_STATUS_INCOMPLETE if missing_outputs else RECORD_STATUS_FINISHED
-        )
-
-        self._save_provenance()
-
         if missing_outputs:
-            raise FileNotFoundError(
-                f"Missing outputs at attempted completion: {missing_outputs}"
-            )
+            message = f"Missing expected outputs: {missing_outputs}"
+            self.status = RECORD_STATUS_INCOMPLETE
+            self._error = {
+                "type": "MissingOutputs",
+                "message": message,
+                "missing_outputs": missing_outputs,
+            }
+            self._save_provenance()
+            raise FileNotFoundError(message)
+        else:
+            self.status = RECORD_STATUS_FINISHED
+            self._save_provenance()
 
         return
 
@@ -177,7 +180,10 @@ class Record:
         self.status = RECORD_STATUS_FAILED
 
         if exception is not None:
-            self._error_type = type(exception).__name__
+            self._error = {
+                "type": type(exception).__name__,
+                "message": str(exception),
+            }
 
         self._save_provenance()
         return
