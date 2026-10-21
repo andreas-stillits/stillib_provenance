@@ -103,7 +103,8 @@ class Record:
             provenance["error_type"] = self._error_type
 
         # Write to a temporary file first to avoid partial writes, then atomically replace with the final file
-        temp_file = self.record_root / PROVENANCE_FILE_NAME + ".tmp"
+        temp_file_name = PROVENANCE_FILE_NAME + ".tmp"
+        temp_file = self.record_root / temp_file_name
         temp_file.write_text(
             json.dumps(provenance, indent=4) + "\n",
             encoding="utf-8",
@@ -134,7 +135,7 @@ class Record:
         self._save_provenance()
         return
 
-    def add_output(self, name: str, path: PathLike) -> None:
+    def add_output(self, name: str, path: PathArg) -> None:
         self._ensure_running()
 
         # check if already recorded
@@ -160,6 +161,7 @@ class Record:
         self.status = (
             RECORD_STATUS_INCOMPLETE if missing_outputs else RECORD_STATUS_FINISHED
         )
+
         self._save_provenance()
 
         if missing_outputs:
@@ -199,7 +201,7 @@ class Record:
 def start_record(
     config: BaseModel,
     *,
-    directory: PathLike,  # target directory for the record
+    directory: PathArg,  # target directory for the record
     inputs: Mapping[str, PathArg] | None = None,
     outputs: Mapping[str, PathArg] | None = None,
 ) -> Record:
