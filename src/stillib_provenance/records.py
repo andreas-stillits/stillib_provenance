@@ -71,7 +71,7 @@ class Record:
 
         # If anything is missing, raise an error
         if missing_inputs:
-            raise FileNotFoundError(f"Missing input files: {', '.join(missing_inputs)}")
+            raise FileNotFoundError(f"Missing input files: {missing_inputs}")
 
         # If a previos record already exists, raise an error to prevent accidental overwrite
         if self._config_file.exists() or self._provenance_file.exists():
