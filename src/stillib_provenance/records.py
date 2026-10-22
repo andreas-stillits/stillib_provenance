@@ -35,16 +35,6 @@ PROVENANCE_FILE_NAME: str = "provenance.json"
 # --------------------------------------------
 
 
-def _paths(files: Mapping[str, PathArg] | None) -> dict[str, Path]:
-    """
-    Internal utility to convert a mapping of string keys to path-like values into a dictionary of string keys to fully resolved Path objects.
-    Allows the user to provide either strings or Path objects while ensuring internal consistency.
-    Defines the default behavior of expanding user home directories and resolving relative paths to absolute paths.
-    Returns an empty dictionary if the input mapping is None.
-    """
-    return {name: resolve_path(path) for name, path in (files or {}).items()}
-
-
 class FileRecord:
     def __init__(self, name: str, path: PathArg, hash_content: bool) -> None:
         self.name = name
@@ -92,27 +82,36 @@ class Record:
         self._git_root = resolve_path(git_root) if git_root is not None else None
         self._git_info = inspect_git(self._git_root)
 
-        # prepare all provided data before writing to disk
+        # serialize the provided config to JSON for storage
         config_json = config.model_dump_json(
             indent=4, round_trip=True, warnings="error"
         )
-        self._input_paths = _paths(inputs)
-        self._output_paths = _paths(outputs)
-
-        # identify missing files
-        missing_inputs = [
-            name for name, path in self._input_paths.items() if not path.exists()
-        ]
-
-        # If anything is missing, raise an error
-        if missing_inputs:
-            raise FileNotFoundError(f"Missing input files: {missing_inputs}")
 
         # If a previos record already exists, raise an error to prevent accidental overwrite
         if self._config_file.exists() or self._provenance_file.exists():
             raise FileExistsError(
                 f"Record already exists in {self.directory}. Please choose a different directory or remove the existing record."
             )
+
+        # register the provided input and output paths
+        self._inputs = [
+            FileRecord(name, path, self._hash_files)
+            for name, path in (inputs or {}).items()
+        ]
+        self._outputs = [
+            FileRecord(name, path, self._hash_files)
+            for name, path in (outputs or {}).items()
+        ]
+
+        # inspect all declared inputs
+        missing_inputs = []
+        for input in self._inputs:
+            input = input.inspect()
+            if not input.exists:
+                missing_inputs.append(input.path)
+
+        if missing_inputs:
+            raise FileNotFoundError(f"Missing input files: {missing_inputs}")
 
         # If these things have passed:
         #   serialization of the provided config
@@ -121,27 +120,6 @@ class Record:
         # then we can safely initialize the record directory and write the initial files.
         self.status: str = RECORD_STATUS_RUNNING
         self._error: dict | None = None
-
-        # upgrade inputs to include file metadata
-        self._inputs = {
-            name: {
-                "path": str(path),
-                **inspect_file(path, hash_content=self._hash_files),
-            }
-            for name, path in self._input_paths.items()
-        }
-
-        # postbone hashing of outputs until finish().
-        # Intention is declared at __init__, but files are not guaranteed to exist until finish()
-        self._outputs = {
-            name: {
-                "path": str(path),
-                **inspect_file(
-                    None, hash_content=self._hash_files
-                ),  # pass None to get an empty schema back
-            }
-            for name, path in self._output_paths.items()
-        }
 
         # Create the record directory and write the config file only AFTER all verification
         self.record_root.mkdir(parents=True, exist_ok=True)
@@ -162,8 +140,8 @@ class Record:
             "duration_seconds": self._duration,
             "status": self.status,
             "git": self._git_info,
-            "inputs": {name: data for name, data in self._inputs.items()},
-            "outputs": {name: data for name, data in self._outputs.items()},
+            "inputs": {input.name: input.as_dict() for input in self._inputs},
+            "outputs": {output.name: output.as_dict() for output in self._outputs},
         }
 
         if self._error is not None:
@@ -186,45 +164,35 @@ class Record:
         self._ensure_running()
 
         # check if already recorded
-        if name in self._inputs:
+        if name in [input.name for input in self._inputs]:
             raise ValueError(f"Input '{name}' already registered.")
 
-        resolved_path = resolve_path(path)
+        # declare the input
+        input = FileRecord(name, path, self._hash_files)
+        self._inputs.append(input)
 
-        # verify existence
-        if not resolved_path.exists():
-            raise FileNotFoundError(f"Input file '{resolved_path}' does not exist.")
-
-        # add to inputs
-        self._inputs[name] = {
-            "path": str(resolved_path),
-            **inspect_file(resolved_path, hash_content=self._hash_files),
-        }
+        # inspect it
+        input.inspect()
+        if not input.exists:
+            raise FileNotFoundError(f"Input file '{input.path}' does not exist.")
 
         # update the written record
         self._save_provenance()
-        return
 
     def add_output(self, name: str, path: PathArg) -> None:
         self._ensure_running()
 
         # check if already recorded
-        if name in self._outputs:
+        if name in [output.name for output in self._outputs]:
             raise ValueError(f"Output '{name}' already registered.")
 
-        # add to outputs
-        self._outputs[name] = {
-            "path": str(resolve_path(path)),
-            **inspect_file(None, hash_content=self._hash_files),
-        }
+        # declare the output
+        self._outputs.append(FileRecord(name, path, self._hash_files))
 
         # update the written record
         self._save_provenance()
 
-    def finish(
-        self,
-    ) -> None:
-        self._ensure_running()
+    def _terminate(self) -> None:
         self._time_exit = utc_now()
         self._duration = round(
             (
@@ -234,11 +202,18 @@ class Record:
             3,
         )
 
-        missing_outputs = [
-            name
-            for name, data in self._outputs.items()
-            if not Path(data["path"]).exists()
-        ]
+    def finish(
+        self,
+    ) -> None:
+        self._ensure_running()
+        self._terminate()
+
+        # inspect all outputs
+        missing_outputs = []
+        for output in self._outputs:
+            output = output.inspect()
+            if not output.exists:
+                missing_outputs.append(output.path)
 
         if missing_outputs:
             message = f"Missing expected outputs: {missing_outputs}"
@@ -250,27 +225,12 @@ class Record:
             self._save_provenance()
             raise FileNotFoundError(message)
         else:
-            self._outputs = {
-                name: {
-                    "path": str(data["path"]),
-                    **inspect_file(data["path"], hash_content=self._hash_files),
-                }
-                for name, data in self._outputs.items()
-            }
-
             self.status = RECORD_STATUS_FINISHED
             self._save_provenance()
 
     def fail(self, exception=None) -> None:
         self._ensure_running()
-        self._time_exit = utc_now()
-        self._duration = round(
-            (
-                datetime.fromisoformat(self._time_exit)
-                - datetime.fromisoformat(self._time_entry)
-            ).total_seconds(),
-            3,
-        )
+        self._terminate()
 
         self.status = RECORD_STATUS_FAILED
 
