@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from datetime import datetime
 from os import PathLike
 from pathlib import Path
 from typing import Self
 
 from pydantic import BaseModel
 
+from .context import inspect_git, utc_now
 from .inspection import inspect_file
 
 PathArg = str | PathLike[str]  # versatile user input type for paths
@@ -56,12 +58,15 @@ class Record:
         inputs: Mapping[str, PathArg] | None = None,
         outputs: Mapping[str, PathArg] | None = None,
         hash_files: bool = True,
+        git_root: PathArg | None = None,
     ) -> None:
         self.directory = _resolve_path(directory)
         self.record_root = self.directory / RECORD_DIRECTORY_NAME
         self._config_file = self.record_root / CONFIG_FILE_NAME
         self._provenance_file = self.record_root / PROVENANCE_FILE_NAME
         self._hash_files = hash_files
+        self._git_root = _resolve_path(git_root) if git_root is not None else None
+        self._git_info = inspect_git(self._git_root)
 
         # prepare all provided data before writing to disk
         config_json = config.model_dump_json(indent=4)
@@ -118,12 +123,19 @@ class Record:
             for name, path in self._output_paths.items()
         }
 
+        self._time_entry = utc_now()  # record the time of record creation
+        self._time_exit = None  # will be set when the record is finished or failed
+        self._duration = None  # will be set when the record is finished or failed
         self._save_provenance()
 
     def _save_provenance(self) -> None:
         provenance = {
             "schema_version": RECORD_SCHEMA_VERSION,
+            "entry": self._time_entry,
+            "exit": self._time_exit,
+            "duration_seconds": self._duration,
             "status": self.status,
+            "git": self._git_info,
             "inputs": {name: data for name, data in self._inputs.items()},
             "outputs": {name: data for name, data in self._outputs.items()},
         }
@@ -187,6 +199,14 @@ class Record:
         self,
     ) -> None:
         self._ensure_running()
+        self._time_exit = utc_now()
+        self._duration = round(
+            (
+                datetime.fromisoformat(self._time_exit)
+                - datetime.fromisoformat(self._time_entry)
+            ).total_seconds(),
+            3,
+        )
 
         missing_outputs = [
             name
@@ -218,6 +238,14 @@ class Record:
 
     def fail(self, exception=None) -> None:
         self._ensure_running()
+        self._time_exit = utc_now()
+        self._duration = round(
+            (
+                datetime.fromisoformat(self._time_exit)
+                - datetime.fromisoformat(self._time_entry)
+            ).total_seconds(),
+            3,
+        )
 
         self.status = RECORD_STATUS_FAILED
 
