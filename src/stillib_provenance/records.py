@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from .context import inspect_git, utc_now
 from .inspection import inspect_file
+from .io import resolve_path
 
 PathArg = str | PathLike[str]  # versatile user input type for paths
 
@@ -34,10 +35,6 @@ PROVENANCE_FILE_NAME: str = "provenance.json"
 # --------------------------------------------
 
 
-def _resolve_path(path: PathArg) -> Path:
-    return Path(path).expanduser().resolve()
-
-
 def _paths(files: Mapping[str, PathArg] | None) -> dict[str, Path]:
     """
     Internal utility to convert a mapping of string keys to path-like values into a dictionary of string keys to fully resolved Path objects.
@@ -45,7 +42,7 @@ def _paths(files: Mapping[str, PathArg] | None) -> dict[str, Path]:
     Defines the default behavior of expanding user home directories and resolving relative paths to absolute paths.
     Returns an empty dictionary if the input mapping is None.
     """
-    return {name: _resolve_path(path) for name, path in (files or {}).items()}
+    return {name: resolve_path(path) for name, path in (files or {}).items()}
 
 
 class Record:
@@ -60,16 +57,18 @@ class Record:
         hash_files: bool = True,
         git_root: PathArg | None = None,
     ) -> None:
-        self.directory = _resolve_path(directory)
+        self.directory = resolve_path(directory)
         self.record_root = self.directory / RECORD_DIRECTORY_NAME
         self._config_file = self.record_root / CONFIG_FILE_NAME
         self._provenance_file = self.record_root / PROVENANCE_FILE_NAME
         self._hash_files = hash_files
-        self._git_root = _resolve_path(git_root) if git_root is not None else None
+        self._git_root = resolve_path(git_root) if git_root is not None else None
         self._git_info = inspect_git(self._git_root)
 
         # prepare all provided data before writing to disk
-        config_json = config.model_dump_json(indent=4)
+        config_json = config.model_dump_json(
+            indent=4, round_trip=True, warnings="error"
+        )
         self._input_paths = _paths(inputs)
         self._output_paths = _paths(outputs)
 
@@ -96,12 +95,6 @@ class Record:
         self.status: str = RECORD_STATUS_RUNNING
         self._error: dict | None = None
 
-        # Create the record directory and write the config file
-        self.record_root.mkdir(parents=True, exist_ok=True)
-
-        with self._config_file.open("x", encoding="utf-8") as file:
-            file.write(config_json + "\n")
-
         # upgrade inputs to include file metadata
         self._inputs = {
             name: {
@@ -122,6 +115,12 @@ class Record:
             }
             for name, path in self._output_paths.items()
         }
+
+        # Create the record directory and write the config file only AFTER all verification
+        self.record_root.mkdir(parents=True, exist_ok=True)
+
+        with self._config_file.open("x", encoding="utf-8") as file:
+            file.write(config_json + "\n")
 
         self._time_entry = utc_now()  # record the time of record creation
         self._time_exit = None  # will be set when the record is finished or failed
@@ -163,7 +162,7 @@ class Record:
         if name in self._inputs:
             raise ValueError(f"Input '{name}' already registered.")
 
-        resolved_path = _resolve_path(path)
+        resolved_path = resolve_path(path)
 
         # verify existence
         if not resolved_path.exists():
@@ -188,7 +187,7 @@ class Record:
 
         # add to outputs
         self._outputs[name] = {
-            "path": str(_resolve_path(path)),
+            "path": str(resolve_path(path)),
             **inspect_file(None, hash_content=self._hash_files),
         }
 
@@ -216,16 +215,14 @@ class Record:
 
         if missing_outputs:
             message = f"Missing expected outputs: {missing_outputs}"
-            self.status = RECORD_STATUS_INCOMPLETE
             self._error = {
                 "type": "MissingOutputs",
                 "message": message,
             }
+            self.status = RECORD_STATUS_INCOMPLETE
             self._save_provenance()
             raise FileNotFoundError(message)
         else:
-            self.status = RECORD_STATUS_FINISHED
-
             self._outputs = {
                 name: {
                     "path": str(data["path"]),
@@ -234,6 +231,7 @@ class Record:
                 for name, data in self._outputs.items()
             }
 
+            self.status = RECORD_STATUS_FINISHED
             self._save_provenance()
 
     def fail(self, exception=None) -> None:
@@ -280,6 +278,7 @@ def start_record(
     inputs: Mapping[str, PathArg] | None = None,
     outputs: Mapping[str, PathArg] | None = None,
     hash_files: bool = True,
+    git_root: PathArg | None = None,
 ) -> Record:
     """Factory initializing a Record instance"""
     # later potentially inspect metadata first ...
@@ -289,4 +288,5 @@ def start_record(
         inputs=inputs,
         outputs=outputs,
         hash_files=hash_files,
+        git_root=git_root,
     )

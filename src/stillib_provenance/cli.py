@@ -15,7 +15,9 @@ def main(argv: list[str] | None = None) -> None:
         description="A CLI tool for initializing a config.py template file.",
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="Available commands.")
+    subparsers = parser.add_subparsers(
+        dest="command", help="Available commands.", required=True
+    )
 
     init_parser = subparsers.add_parser(
         "init", help="Initialize a new config.py template file."

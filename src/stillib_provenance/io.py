@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+from os import PathLike
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
+
+PathArg = str | PathLike[str]
 
 
 def _deep_update(base: dict, updates: dict) -> dict:
@@ -29,8 +32,12 @@ def _deep_update(base: dict, updates: dict) -> dict:
     return result
 
 
+def resolve_path(path: PathArg) -> Path:
+    return Path(path).expanduser().resolve()
+
+
 def load_config[ConfigType: BaseModel](
-    ConfigModel: type[ConfigType], source: str | Path | None = None, **overrides: Any
+    ConfigModel: type[ConfigType], source: PathArg | None = None, **overrides: Any
 ) -> ConfigType:
     """
     Load a configuration model according to the hierarchy: defaults -> provided .json file -> python overrides.
@@ -46,7 +53,7 @@ def load_config[ConfigType: BaseModel](
     values: dict[str, Any] = {}
 
     if source is not None:
-        source_path = Path(source)
+        source_path = resolve_path(source)
         if not source_path.exists():
             raise FileNotFoundError(f"Configuration file not found: {source_path}")
 
@@ -88,7 +95,7 @@ def update_config[ConfigType: BaseModel](
     return type(config).model_validate(values)
 
 
-def dump_config(config: BaseModel, path: str | Path) -> Path:
+def dump_config(config: BaseModel, path: PathArg) -> Path:
     """
     Dump a validated configuration model to a JSON file.
     Warning: existing files are replaced and parent directories required to exist.
@@ -100,7 +107,7 @@ def dump_config(config: BaseModel, path: str | Path) -> Path:
     Returns:
         The Path object representing the file path where the configuration was dumped.
     """
-    path = Path(path)
+    path = resolve_path(path)
     # serialize for json with indentation and without aliasing, suitable for re-validation
     payload = config.model_dump_json(
         indent=4,
