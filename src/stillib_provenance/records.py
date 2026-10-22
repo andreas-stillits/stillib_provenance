@@ -8,6 +8,8 @@ from typing import Self
 
 from pydantic import BaseModel
 
+from .inspection import inspect_file
+
 PathArg = str | PathLike[str]  # versatile user input type for paths
 
 # HEADER FOR MAGIC STRINGS
@@ -53,20 +55,22 @@ class Record:
         directory: PathArg,
         inputs: Mapping[str, PathArg] | None = None,
         outputs: Mapping[str, PathArg] | None = None,
+        hash_files: bool = True,
     ) -> None:
         self.directory = _resolve_path(directory)
         self.record_root = self.directory / RECORD_DIRECTORY_NAME
         self._config_file = self.record_root / CONFIG_FILE_NAME
         self._provenance_file = self.record_root / PROVENANCE_FILE_NAME
+        self._hash_files = hash_files
 
         # prepare all provided data before writing to disk
         config_json = config.model_dump_json(indent=4)
-        self._inputs = _paths(inputs)
-        self._outputs = _paths(outputs)
+        self._input_paths = _paths(inputs)
+        self._output_paths = _paths(outputs)
 
         # identify missing files
         missing_inputs = [
-            name for name, path in self._inputs.items() if not path.exists()
+            name for name, path in self._input_paths.items() if not path.exists()
         ]
 
         # If anything is missing, raise an error
@@ -87,11 +91,32 @@ class Record:
         self.status: str = RECORD_STATUS_RUNNING
         self._error: dict | None = None
 
-        # Create the record directory and write the initial files
+        # Create the record directory and write the config file
         self.record_root.mkdir(parents=True, exist_ok=True)
 
         with self._config_file.open("x", encoding="utf-8") as file:
             file.write(config_json + "\n")
+
+        # upgrade inputs to include file metadata
+        self._inputs = {
+            name: {
+                "path": str(path),
+                **inspect_file(path, hash_content=self._hash_files),
+            }
+            for name, path in self._input_paths.items()
+        }
+
+        # postbone hashing of outputs until finish().
+        # Intention is declared at __init__, but files are not guaranteed to exist until finish()
+        self._outputs = {
+            name: {
+                "path": str(path),
+                **inspect_file(
+                    None, hash_content=self._hash_files
+                ),  # pass None to get an empty schema back
+            }
+            for name, path in self._output_paths.items()
+        }
 
         self._save_provenance()
 
@@ -99,8 +124,8 @@ class Record:
         provenance = {
             "schema_version": RECORD_SCHEMA_VERSION,
             "status": self.status,
-            "inputs": {name: str(path) for name, path in self._inputs.items()},
-            "outputs": {name: str(path) for name, path in self._outputs.items()},
+            "inputs": {name: data for name, data in self._inputs.items()},
+            "outputs": {name: data for name, data in self._outputs.items()},
         }
 
         if self._error is not None:
@@ -133,7 +158,10 @@ class Record:
             raise FileNotFoundError(f"Input file '{resolved_path}' does not exist.")
 
         # add to inputs
-        self._inputs[name] = resolved_path
+        self._inputs[name] = {
+            "path": str(resolved_path),
+            **inspect_file(resolved_path, hash_content=self._hash_files),
+        }
 
         # update the written record
         self._save_provenance()
@@ -147,7 +175,10 @@ class Record:
             raise ValueError(f"Output '{name}' already registered.")
 
         # add to outputs
-        self._outputs[name] = _resolve_path(path)
+        self._outputs[name] = {
+            "path": str(_resolve_path(path)),
+            **inspect_file(None, hash_content=self._hash_files),
+        }
 
         # update the written record
         self._save_provenance()
@@ -158,7 +189,9 @@ class Record:
         self._ensure_running()
 
         missing_outputs = [
-            name for name, path in self._outputs.items() if not path.exists()
+            name
+            for name, data in self._outputs.items()
+            if not Path(data["path"]).exists()
         ]
 
         if missing_outputs:
@@ -172,6 +205,15 @@ class Record:
             raise FileNotFoundError(message)
         else:
             self.status = RECORD_STATUS_FINISHED
+
+            self._outputs = {
+                name: {
+                    "path": str(data["path"]),
+                    **inspect_file(data["path"], hash_content=self._hash_files),
+                }
+                for name, data in self._outputs.items()
+            }
+
             self._save_provenance()
 
     def fail(self, exception=None) -> None:
@@ -209,6 +251,7 @@ def start_record(
     directory: PathArg,  # target directory for the record
     inputs: Mapping[str, PathArg] | None = None,
     outputs: Mapping[str, PathArg] | None = None,
+    hash_files: bool = True,
 ) -> Record:
     """Factory initializing a Record instance"""
     # later potentially inspect metadata first ...
@@ -217,4 +260,5 @@ def start_record(
         directory=directory,
         inputs=inputs,
         outputs=outputs,
+        hash_files=hash_files,
     )
