@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stillib_provenance"
-version = "0.3.0"
+version = "0.4.0"
 description = "A config and provenance management utility build on Pydantic 2"
 readme = "README.md"
 requires-python = ">=3.12"
