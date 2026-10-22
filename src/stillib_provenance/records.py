@@ -45,6 +45,33 @@ def _paths(files: Mapping[str, PathArg] | None) -> dict[str, Path]:
     return {name: resolve_path(path) for name, path in (files or {}).items()}
 
 
+class FileRecord:
+    def __init__(self, name: str, path: PathArg, hash_content: bool) -> None:
+        self.name = name
+        self.path = resolve_path(path)
+        self.hash_content = hash_content
+
+        self.exists: bool | None = None
+        self.size_bytes: int | None = None
+        self.sha256: str | None = None
+
+    def inspect(self) -> Self:
+        result: dict = inspect_file(self.path, hash_content=self.hash_content)
+
+        self.exists = result["exists"]
+        self.size_bytes = result["size_bytes"]
+        self.sha256 = result["sha256"]
+        return self
+
+    def as_dict(self) -> dict:
+        return {
+            "path": str(self.path),
+            "exists": self.exists,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+        }
+
+
 class Record:
 
     def __init__(

@@ -6,11 +6,13 @@ import stat
 from pathlib import Path
 from typing import Any
 
+from .io import resolve_path
+
 STREAMING_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 
 def inspect_file(
-    path: str | os.PathLike | None,
+    path: str | os.PathLike[str],
     *,
     hash_content: bool = True,
 ) -> dict[str, Any]:
@@ -25,14 +27,8 @@ def inspect_file(
         - Missing files are just reported to Record, not raised as exceptions locally.
         - Tries to catch if a file is modified by another process during hashing by checking size and modification time before and after reading.
     """
-    if path is None:
-        return {
-            "exists": None,
-            "size_bytes": None,
-            "sha256": None,
-        }
 
-    path = Path(path)
+    path = resolve_path(path)
 
     try:
         info = path.stat()
