@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from .io import PathArg, resolve_path
 

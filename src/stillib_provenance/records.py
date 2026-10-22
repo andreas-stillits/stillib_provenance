@@ -25,7 +25,7 @@ type RecordStatus = Literal[
 ]
 
 
-class Provenance(TypedDict):
+class ProvenancePayload(TypedDict):
     schema_version: str
     entry: str
     exit: str | None
@@ -46,13 +46,12 @@ class _FileRecord:
         self.size_bytes: int | None = None
         self.sha256: str | None = None
 
-    def inspect(self) -> Self:
+    def inspect(self) -> None:
         result = inspect_file(self.path, hash_content=self.hash_content)
 
         self.exists = result["exists"]
         self.size_bytes = result["size_bytes"]
         self.sha256 = result["sha256"]
-        return self
 
     def as_dict(self) -> FileInspection:
         return {
@@ -97,8 +96,10 @@ class Record:
             )
 
         self._time_entry = get_utc_now()  # record the time of record creation
-        self._time_exit = None  # will be set when the record is finished or failed
-        self._duration = (
+        self._time_exit: str | None = (
+            None  # will be set when the record is finished or failed
+        )
+        self._duration: float | None = (
             None  # includes input and output hashing to better reflect practical cost
         )
 
@@ -140,8 +141,8 @@ class Record:
 
         self._save_provenance()
 
-    def as_dict(self) -> Provenance:
-        provenance: Provenance = {
+    def _as_dict(self) -> ProvenancePayload:
+        provenance: ProvenancePayload = {
             "schema_version": RECORD_SCHEMA_VERSION,
             "entry": self._time_entry,
             "exit": self._time_exit,
@@ -164,7 +165,7 @@ class Record:
         temp_file_name = PROVENANCE_FILE_NAME + ".tmp"
         temp_file = self.directory / temp_file_name
         temp_file.write_text(
-            json.dumps(self.as_dict(), indent=4) + "\n",
+            json.dumps(self._as_dict(), indent=4) + "\n",
             encoding="utf-8",
         )
         temp_file.replace(self._provenance_file)
