@@ -11,9 +11,7 @@ from pydantic import BaseModel
 
 from .context import inspect_git, utc_now
 from .inspection import inspect_file
-from .io import resolve_path
-
-PathArg = str | PathLike[str]  # versatile user input type for paths
+from .io import PathArg, resolve_path
 
 # HEADER FOR MAGIC STRINGS
 # --------------------------------------------
@@ -35,7 +33,7 @@ PROVENANCE_FILE_NAME: str = "provenance.json"
 # --------------------------------------------
 
 
-class FileRecord:
+class _FileRecord:
     def __init__(self, name: str, path: PathArg, hash_content: bool) -> None:
         self.name = name
         self.path = resolve_path(path)
@@ -95,11 +93,11 @@ class Record:
 
         # register the provided input and output paths
         self._inputs = [
-            FileRecord(name, path, self._hash_files)
+            _FileRecord(name, path, self._hash_files)
             for name, path in (inputs or {}).items()
         ]
         self._outputs = [
-            FileRecord(name, path, self._hash_files)
+            _FileRecord(name, path, self._hash_files)
             for name, path in (outputs or {}).items()
         ]
 
@@ -168,13 +166,14 @@ class Record:
             raise ValueError(f"Input '{name}' already registered.")
 
         # declare the input
-        input = FileRecord(name, path, self._hash_files)
-        self._inputs.append(input)
-
+        input = _FileRecord(name, path, self._hash_files)
         # inspect it
         input.inspect()
         if not input.exists:
             raise FileNotFoundError(f"Input file '{input.path}' does not exist.")
+
+        # only append when existence is verified
+        self._inputs.append(input)
 
         # update the written record
         self._save_provenance()
@@ -187,7 +186,7 @@ class Record:
             raise ValueError(f"Output '{name}' already registered.")
 
         # declare the output
-        self._outputs.append(FileRecord(name, path, self._hash_files))
+        self._outputs.append(_FileRecord(name, path, self._hash_files))
 
         # update the written record
         self._save_provenance()
@@ -206,22 +205,27 @@ class Record:
         self,
     ) -> None:
         self._ensure_running()
+
+        # catch exceptions at inspection to be able to commit the record before re-raising
+        try:
+            for output in self._outputs:
+                output.inspect()
+        except Exception as exception:
+            self.fail(exception)
+            raise
+
         self._terminate()
 
-        # inspect all outputs
-        missing_outputs = []
-        for output in self._outputs:
-            output = output.inspect()
-            if not output.exists:
-                missing_outputs.append(output.path)
+        # collect potential missing outputs
+        missing_outputs = [output.path for output in self._outputs if not output.exists]
 
         if missing_outputs:
             message = f"Missing expected outputs: {missing_outputs}"
+            self.status = RECORD_STATUS_INCOMPLETE
             self._error = {
                 "type": "MissingOutputs",
                 "message": message,
             }
-            self.status = RECORD_STATUS_INCOMPLETE
             self._save_provenance()
             raise FileNotFoundError(message)
         else:
