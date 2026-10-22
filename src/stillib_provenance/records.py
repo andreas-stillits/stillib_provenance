@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import datetime
-from os import PathLike
-from pathlib import Path
 from typing import Self
 
 from pydantic import BaseModel
@@ -67,6 +64,7 @@ class Record:
         inputs: Mapping[str, PathArg] | None = None,
         outputs: Mapping[str, PathArg] | None = None,
         hash_files: bool = True,
+        force_overwrite: bool = False,
         git_root: PathArg | None = None,
     ) -> None:
         self.directory = resolve_path(directory)
@@ -82,7 +80,9 @@ class Record:
         )
 
         # If a previos record already exists, raise an error to prevent accidental overwrite
-        if self._config_file.exists() or self._provenance_file.exists():
+        if not force_overwrite and (
+            self._config_file.exists() or self._provenance_file.exists()
+        ):
             raise FileExistsError(
                 f"Record already exists in {self.directory}. Please choose a different directory or remove the existing record."
             )
@@ -269,6 +269,7 @@ def start_record(
     inputs: Mapping[str, PathArg] | None = None,
     outputs: Mapping[str, PathArg] | None = None,
     hash_files: bool = True,
+    force_overwrite: bool = False,
     git_root: PathArg | None = None,
 ) -> Record:
     """Factory initializing a Record instance"""
@@ -279,5 +280,6 @@ def start_record(
         inputs=inputs,
         outputs=outputs,
         hash_files=hash_files,
+        force_overwrite=force_overwrite,
         git_root=git_root,
     )
