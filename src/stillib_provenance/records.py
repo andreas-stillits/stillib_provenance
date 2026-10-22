@@ -9,7 +9,7 @@ from typing import Self
 
 from pydantic import BaseModel
 
-from .context import inspect_git, utc_now
+from .context import get_duration, get_utc_now, inspect_git
 from .inspection import inspect_file
 from .io import PathArg, resolve_path
 
@@ -26,16 +26,13 @@ RECORD_STATUS_FINISHED: str = (
 RECORD_STATUS_INCOMPLETE: str = "incomplete"  # some declared outputs are not present
 RECORD_STATUS_FAILED: str = "failed"  # 'something' raised any exception
 
-RECORD_DIRECTORY_NAME: str = "record"
-
 CONFIG_FILE_NAME: str = "config.json"
 PROVENANCE_FILE_NAME: str = "provenance.json"
 # --------------------------------------------
 
 
 class _FileRecord:
-    def __init__(self, name: str, path: PathArg, hash_content: bool) -> None:
-        self.name = name
+    def __init__(self, path: PathArg, hash_content: bool) -> None:
         self.path = resolve_path(path)
         self.hash_content = hash_content
 
@@ -44,14 +41,14 @@ class _FileRecord:
         self.sha256: str | None = None
 
     def inspect(self) -> Self:
-        result: dict = inspect_file(self.path, hash_content=self.hash_content)
+        result = inspect_file(self.path, hash_content=self.hash_content)
 
         self.exists = result["exists"]
         self.size_bytes = result["size_bytes"]
         self.sha256 = result["sha256"]
         return self
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, str | bool | int | None]:
         return {
             "path": str(self.path),
             "exists": self.exists,
@@ -73,9 +70,8 @@ class Record:
         git_root: PathArg | None = None,
     ) -> None:
         self.directory = resolve_path(directory)
-        self.record_root = self.directory / RECORD_DIRECTORY_NAME
-        self._config_file = self.record_root / CONFIG_FILE_NAME
-        self._provenance_file = self.record_root / PROVENANCE_FILE_NAME
+        self._config_file = self.directory / CONFIG_FILE_NAME
+        self._provenance_file = self.directory / PROVENANCE_FILE_NAME
         self._hash_files = hash_files
         self._git_root = resolve_path(git_root) if git_root is not None else None
         self._git_info = inspect_git(self._git_root)
@@ -91,22 +87,29 @@ class Record:
                 f"Record already exists in {self.directory}. Please choose a different directory or remove the existing record."
             )
 
+        self._time_entry = get_utc_now()  # record the time of record creation
+        self._time_exit = None  # will be set when the record is finished or failed
+        self._duration = (
+            None  # includes input and output hashing to better reflect practical cost
+        )
+
         # register the provided input and output paths
-        self._inputs = [
-            _FileRecord(name, path, self._hash_files)
+        self._inputs = {
+            name: _FileRecord(path, self._hash_files)
             for name, path in (inputs or {}).items()
-        ]
-        self._outputs = [
-            _FileRecord(name, path, self._hash_files)
+        }
+
+        self._outputs = {
+            name: _FileRecord(path, self._hash_files)
             for name, path in (outputs or {}).items()
-        ]
+        }
 
         # inspect all declared inputs
-        missing_inputs = []
-        for input in self._inputs:
-            input = input.inspect()
+        missing_inputs = {}
+        for name, input in self._inputs.items():
+            input.inspect()
             if not input.exists:
-                missing_inputs.append(input.path)
+                missing_inputs[name] = input.path
 
         if missing_inputs:
             raise FileNotFoundError(f"Missing input files: {missing_inputs}")
@@ -120,14 +123,11 @@ class Record:
         self._error: dict | None = None
 
         # Create the record directory and write the config file only AFTER all verification
-        self.record_root.mkdir(parents=True, exist_ok=True)
+        self.directory.mkdir(parents=True, exist_ok=True)
 
         with self._config_file.open("x", encoding="utf-8") as file:
             file.write(config_json + "\n")
 
-        self._time_entry = utc_now()  # record the time of record creation
-        self._time_exit = None  # will be set when the record is finished or failed
-        self._duration = None  # will be set when the record is finished or failed
         self._save_provenance()
 
     def _save_provenance(self) -> None:
@@ -138,8 +138,10 @@ class Record:
             "duration_seconds": self._duration,
             "status": self.status,
             "git": self._git_info,
-            "inputs": {input.name: input.as_dict() for input in self._inputs},
-            "outputs": {output.name: output.as_dict() for output in self._outputs},
+            "inputs": {name: input.as_dict() for name, input in self._inputs.items()},
+            "outputs": {
+                name: output.as_dict() for name, output in self._outputs.items()
+            },
         }
 
         if self._error is not None:
@@ -147,7 +149,7 @@ class Record:
 
         # Write to a temporary file first to avoid partial writes, then atomically replace with the final file
         temp_file_name = PROVENANCE_FILE_NAME + ".tmp"
-        temp_file = self.record_root / temp_file_name
+        temp_file = self.directory / temp_file_name
         temp_file.write_text(
             json.dumps(provenance, indent=4) + "\n",
             encoding="utf-8",
@@ -162,18 +164,18 @@ class Record:
         self._ensure_running()
 
         # check if already recorded
-        if name in [input.name for input in self._inputs]:
+        if name in self._inputs:
             raise ValueError(f"Input '{name}' already registered.")
 
         # declare the input
-        input = _FileRecord(name, path, self._hash_files)
+        input = _FileRecord(path, self._hash_files)
         # inspect it
         input.inspect()
         if not input.exists:
             raise FileNotFoundError(f"Input file '{input.path}' does not exist.")
 
         # only append when existence is verified
-        self._inputs.append(input)
+        self._inputs[name] = input
 
         # update the written record
         self._save_provenance()
@@ -182,24 +184,18 @@ class Record:
         self._ensure_running()
 
         # check if already recorded
-        if name in [output.name for output in self._outputs]:
+        if name in self._outputs:
             raise ValueError(f"Output '{name}' already registered.")
 
         # declare the output
-        self._outputs.append(_FileRecord(name, path, self._hash_files))
+        self._outputs[name] = _FileRecord(path, self._hash_files)
 
         # update the written record
         self._save_provenance()
 
     def _terminate(self) -> None:
-        self._time_exit = utc_now()
-        self._duration = round(
-            (
-                datetime.fromisoformat(self._time_exit)
-                - datetime.fromisoformat(self._time_entry)
-            ).total_seconds(),
-            3,
-        )
+        self._time_exit = get_utc_now()
+        self._duration = get_duration(self._time_entry, self._time_exit)
 
     def finish(
         self,
@@ -208,7 +204,7 @@ class Record:
 
         # catch exceptions at inspection to be able to commit the record before re-raising
         try:
-            for output in self._outputs:
+            for output in self._outputs.values():
                 output.inspect()
         except Exception as exception:
             self.fail(exception)
@@ -217,7 +213,11 @@ class Record:
         self._terminate()
 
         # collect potential missing outputs
-        missing_outputs = [output.path for output in self._outputs if not output.exists]
+        missing_outputs = {
+            name: output.path
+            for name, output in self._outputs.items()
+            if not output.exists
+        }
 
         if missing_outputs:
             message = f"Missing expected outputs: {missing_outputs}"

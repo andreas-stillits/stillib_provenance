@@ -5,9 +5,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 
-def utc_now() -> str:
+def get_utc_now() -> str:
     """Current UTC timestamp in ISO 8601 format."""
     return datetime.now(UTC).isoformat(timespec="microseconds")
+
+
+def get_duration(entry: str, exit: str) -> float | None:
+    """Time difference in seconds between Record entry and exit"""
+    round(
+        (datetime.fromisoformat(exit) - datetime.fromisoformat(entry)).total_seconds(),
+        3,
+    )
 
 
 def _git(directory: Path, *args: str) -> str | None:

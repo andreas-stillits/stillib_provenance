@@ -3,19 +3,24 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
-from .io import resolve_path
+from .io import PathArg, resolve_path
 
 STREAMING_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 
+class FileInspection(TypedDict):
+    exists: bool
+    size_bytes: int | None
+    sha256: str | None
+
+
 def inspect_file(
-    path: str | os.PathLike[str],
+    path: PathArg,
     *,
     hash_content: bool = True,
-) -> dict[str, Any]:
+) -> FileInspection:
     """
     Utility function to inspect a file at a given path.
     Returns a dictionary containing: existence, size in bytes, and SHA256 hash (if requested).
