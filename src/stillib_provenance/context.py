@@ -3,6 +3,13 @@ from __future__ import annotations
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypedDict
+
+
+class GitInspection(TypedDict):
+    commit: str | None
+    branch: str | None
+    dirty: bool | None
 
 
 def get_utc_now() -> str:
@@ -10,9 +17,9 @@ def get_utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="microseconds")
 
 
-def get_duration(entry: str, exit: str) -> float | None:
+def get_duration(entry: str, exit: str) -> float:
     """Time difference in seconds between Record entry and exit"""
-    round(
+    return round(
         (datetime.fromisoformat(exit) - datetime.fromisoformat(entry)).total_seconds(),
         3,
     )
@@ -36,7 +43,7 @@ def _git(directory: Path, *args: str) -> str | None:
 
 def inspect_git(
     git_root: str | Path | None = None,
-) -> dict:
+) -> GitInspection:
     """Capture Git identity and working-tree state."""
 
     directory = (

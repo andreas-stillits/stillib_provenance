@@ -2,30 +2,39 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import Self
+from typing import Literal, NotRequired, Self, TypedDict
 
 from pydantic import BaseModel
 
-from .context import get_duration, get_utc_now, inspect_git
-from .inspection import inspect_file
+from .context import GitInspection, get_duration, get_utc_now, inspect_git
+from .inspection import FileInspection, inspect_file
 from .io import PathArg, resolve_path
 
 # HEADER FOR MAGIC STRINGS
 # --------------------------------------------
 RECORD_SCHEMA_VERSION: str = "1.0"
-
-RECORD_STATUS_RUNNING: str = (
-    "running"  # all declared input files are present, config is serializable
-)
-RECORD_STATUS_FINISHED: str = (
-    "finished"  # all declared outputs files are present (OBS: presence does not imply content)
-)
-RECORD_STATUS_INCOMPLETE: str = "incomplete"  # some declared outputs are not present
-RECORD_STATUS_FAILED: str = "failed"  # 'something' raised any exception
-
 CONFIG_FILE_NAME: str = "config.json"
 PROVENANCE_FILE_NAME: str = "provenance.json"
 # --------------------------------------------
+
+type RecordStatus = Literal[
+    "running",  # all declared input files are present, config is serializable
+    "finished",  # all declared outputs files are present (OBS: presence does not imply content)
+    "incomplete",  # some declared outputs are not present
+    "failed",  # 'something' raised any exception
+]
+
+
+class Provenance(TypedDict):
+    schema_version: str
+    entry: str
+    exit: str | None
+    duration_seconds: float | None
+    status: RecordStatus
+    git: GitInspection
+    inputs: dict[str, FileInspection]
+    outputs: dict[str, FileInspection]
+    error: NotRequired[dict[str, str]]
 
 
 class _FileRecord:
@@ -45,7 +54,7 @@ class _FileRecord:
         self.sha256 = result["sha256"]
         return self
 
-    def as_dict(self) -> dict[str, str | bool | int | None]:
+    def as_dict(self) -> FileInspection:
         return {
             "path": str(self.path),
             "exists": self.exists,
@@ -119,19 +128,20 @@ class Record:
         #   existence of required inputs
         #   non-existence of a previous record
         # then we can safely initialize the record directory and write the initial files.
-        self.status: str = RECORD_STATUS_RUNNING
-        self._error: dict | None = None
+        self.status: RecordStatus = "running"
+        self._error: dict[str, str] | None = None
 
         # Create the record directory and write the config file only AFTER all verification
         self.directory.mkdir(parents=True, exist_ok=True)
 
-        with self._config_file.open("x", encoding="utf-8") as file:
+        mode = "w" if force_overwrite else "x"
+        with self._config_file.open(mode, encoding="utf-8") as file:
             file.write(config_json + "\n")
 
         self._save_provenance()
 
-    def _save_provenance(self) -> None:
-        provenance = {
+    def as_dict(self) -> Provenance:
+        provenance: Provenance = {
             "schema_version": RECORD_SCHEMA_VERSION,
             "entry": self._time_entry,
             "exit": self._time_exit,
@@ -147,17 +157,20 @@ class Record:
         if self._error is not None:
             provenance["error"] = self._error
 
+        return provenance
+
+    def _save_provenance(self) -> None:
         # Write to a temporary file first to avoid partial writes, then atomically replace with the final file
         temp_file_name = PROVENANCE_FILE_NAME + ".tmp"
         temp_file = self.directory / temp_file_name
         temp_file.write_text(
-            json.dumps(provenance, indent=4) + "\n",
+            json.dumps(self.as_dict(), indent=4) + "\n",
             encoding="utf-8",
         )
         temp_file.replace(self._provenance_file)
 
     def _ensure_running(self) -> None:
-        if self.status != RECORD_STATUS_RUNNING:
+        if self.status != "running":
             raise RuntimeError(f"Cannot modify a record with status '{self.status}'.")
 
     def add_input(self, name: str, path: PathArg) -> None:
@@ -221,7 +234,7 @@ class Record:
 
         if missing_outputs:
             message = f"Missing expected outputs: {missing_outputs}"
-            self.status = RECORD_STATUS_INCOMPLETE
+            self.status = "incomplete"
             self._error = {
                 "type": "MissingOutputs",
                 "message": message,
@@ -229,14 +242,14 @@ class Record:
             self._save_provenance()
             raise FileNotFoundError(message)
         else:
-            self.status = RECORD_STATUS_FINISHED
+            self.status = "finished"
             self._save_provenance()
 
     def fail(self, exception=None) -> None:
         self._ensure_running()
         self._terminate()
 
-        self.status = RECORD_STATUS_FAILED
+        self.status = "failed"
 
         if exception is not None:
             self._error = {
@@ -253,7 +266,7 @@ class Record:
         return self
 
     def __exit__(self, exception_type, exception_value, traceback):
-        if self.status == RECORD_STATUS_RUNNING:
+        if self.status == "running":
             if exception_type is None:
                 self.finish()
             else:

@@ -11,7 +11,8 @@ STREAMING_CHUNK_SIZE = 1024 * 1024  # 1 MB
 
 
 class FileInspection(TypedDict):
-    exists: bool
+    path: str
+    exists: bool | None
     size_bytes: int | None
     sha256: str | None
 
@@ -39,6 +40,7 @@ def inspect_file(
         info = path.stat()
     except FileNotFoundError:
         return {
+            "path": str(path),
             "exists": False,
             "size_bytes": None,
             "sha256": None,
@@ -49,6 +51,7 @@ def inspect_file(
 
     if not hash_content:
         return {
+            "path": str(path),
             "exists": True,
             "size_bytes": info.st_size,
             "sha256": None,
@@ -71,6 +74,7 @@ def inspect_file(
         raise ValueError(f"File {path} changed during hashing.")
 
     return {
+        "path": str(path),
         "exists": True,
         "size_bytes": after.st_size,
         "sha256": digest.hexdigest(),
