@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Literal, NotRequired, Self, TypedDict
 
 from pydantic import BaseModel
@@ -31,6 +32,7 @@ class ProvenancePayload(TypedDict):
     exit: str | None
     duration_seconds: float | None
     status: RecordStatus
+    config: Path
     git: GitInspection
     inputs: dict[str, FileInspection]
     outputs: dict[str, FileInspection]
@@ -148,6 +150,7 @@ class Record:
             "exit": self._time_exit,
             "duration_seconds": self._duration,
             "status": self.status,
+            "config": self._config_file,
             "git": self._git_info,
             "inputs": {name: input.as_dict() for name, input in self._inputs.items()},
             "outputs": {
