@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from argparse import ArgumentParser
 
+from .io import resolve_path
 from .scaffold import init_config
 
 
@@ -33,7 +34,8 @@ def main(argv: list[str] | None = None) -> None:
 
     # call init_config if the init command is invoked
     if args.command == "init":
-        init_config(args.path)
+        path = resolve_path(args.path)
+        init_config(path)
 
     return
 

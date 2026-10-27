@@ -16,15 +16,16 @@ Typical use:
         # cleanup triggered automatically when exiting the with block
 """
 
-from .io import load_config, save_config, update_config
+from .io import load_config, load_provenance, save_config, update_config
 from .records import Record, start_record
 from .scaffold import init_config
 
 __all__ = [
     "init_config",
     "load_config",
-    "update_config",
+    "load_provenance",
     "save_config",
+    "update_config",
     "start_record",
     "Record",
 ]

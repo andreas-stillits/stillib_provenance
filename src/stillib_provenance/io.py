@@ -171,3 +171,25 @@ def save_config(config: BaseModel, path: PathArg, force_replace: bool = False) -
         ) from exc
 
     return path
+
+
+def load_provenance(path: PathArg) -> dict[str, Any]:
+    """
+    Load a provenance record from a JSON file.
+
+    Args:
+        path: Path to the provenance JSON file. Relative paths are resolved from the current working directory.
+
+    Returns:
+        A dictionary containing the provenance record.
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        json.JSONDecodeError: If the file is not valid JSON.
+
+    Example:
+        >>> provenance = load_provenance("provenance.json")
+    """
+    path = resolve_path(path)
+    with path.open("r", encoding="utf-8") as file:
+        return json.load(file)

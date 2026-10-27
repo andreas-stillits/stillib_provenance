@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import Literal, NotRequired, Self, TypedDict
+from typing import Any, Literal, NotRequired, Self, TypedDict
 
 from pydantic import BaseModel
 
@@ -35,6 +35,7 @@ class ProvenancePayload(TypedDict):
     git: GitInspection
     inputs: dict[str, FileInspection]
     outputs: dict[str, FileInspection]
+    annotations: NotRequired[dict[str, Any]]
     error: NotRequired[dict[str, str]]
 
 
@@ -94,10 +95,12 @@ class Record:
         directory: PathArg,
         inputs: Mapping[str, PathArg] | None = None,
         outputs: Mapping[str, PathArg] | None = None,
+        annotations: Mapping[str, Any] | None = None,
         hash_files: bool = True,
         force_replace: bool = False,
         git_root: PathArg | None = None,
     ) -> None:
+        self.annotations = dict(annotations) if annotations is not None else {}
         self.directory = resolve_path(directory)
         self._config_file = self.directory / CONFIG_FILE_NAME
         self._provenance_file = self.directory / PROVENANCE_FILE_NAME
@@ -174,6 +177,7 @@ class Record:
             "outputs": {
                 name: output.as_dict() for name, output in self._outputs.items()
             },
+            "annotations": self.annotations,
         }
 
         if self._error is not None:
@@ -257,6 +261,24 @@ class Record:
         self._outputs[name] = _FileRecord(path, self._hash_files)
 
         # update the written record
+        self._save_provenance()
+
+    def add_annotations(self, annotations: Mapping[str, Any]) -> None:
+        """
+        Add arbitrary user annotations to the record.
+
+        Annotations are stored in ``provenance.json`` and can be used for any
+        purpose. They are not inspected or validated by the provenance library.
+
+        The provided annotations are concatenated with any existing annotations.
+        If a key already exists, its value is overwritten.
+
+        Args:
+            annotations: Key-value pairs to add to the record.
+        """
+        self._ensure_running()
+
+        self.annotations.update(annotations)
         self._save_provenance()
 
     def _terminate(self) -> None:
@@ -357,6 +379,7 @@ def start_record(
     directory: PathArg,  # target directory for the record
     inputs: Mapping[str, PathArg] | None = None,
     outputs: Mapping[str, PathArg] | None = None,
+    annotations: Mapping[str, Any] | None = None,
     hash_files: bool = True,
     force_replace: bool = False,
     git_root: PathArg | None = None,
@@ -377,6 +400,7 @@ def start_record(
         inputs: Labels mapped to existing input file paths.
         outputs: Labels mapped to expected output file paths. These files may be
             created during the run.
+        annotations: Arbitrary key-value pairs to store in the record.
         hash_files: Compute SHA-256 digests for inputs and outputs. File sizes
             are recorded even when this is false.
         force_replace: Replace an existing ``config.json`` or
@@ -411,6 +435,7 @@ def start_record(
         directory=directory,
         inputs=inputs,
         outputs=outputs,
+        annotations=annotations,
         hash_files=hash_files,
         force_replace=force_replace,
         git_root=git_root,
