@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from pathlib import Path
 from typing import Literal, NotRequired, Self, TypedDict
 
 from pydantic import BaseModel
 
 from .context import GitInspection, get_duration, get_utc_now, inspect_git
 from .inspection import FileInspection, inspect_file
-from .io import PathArg, resolve_path
+from .io import PathArg, resolve_path, save_config
 
 # HEADER FOR MAGIC STRINGS
 # --------------------------------------------
@@ -32,7 +31,7 @@ class ProvenancePayload(TypedDict):
     exit: str | None
     duration_seconds: float | None
     status: RecordStatus
-    config: Path
+    config: str
     git: GitInspection
     inputs: dict[str, FileInspection]
     outputs: dict[str, FileInspection]
@@ -65,6 +64,28 @@ class _FileRecord:
 
 
 class Record:
+    """
+    A writable provenance record for one program run.
+
+    Create records with ``start_record`` rather than constructing this class
+    directly. Inputs are inspected when they are registered; outputs are
+    inspected when the record is finished.
+
+    A record starts with status ``"running"`` and can transition once to:
+
+    - ``"finished"`` when every declared output exists.
+    - ``"incomplete"`` when a declared output is missing.
+    - ``"failed"`` when the recorded operation raises an exception.
+
+    Use the record as a context manager whenever possible. Normal context
+    exit calls ``finish()``; exceptional exit calls ``fail()`` and does not
+    suppress the original exception.
+
+    Attributes:
+        directory: Directory containing ``config.json`` and
+            ``provenance.json``.
+        status: Current lifecycle status of the record.
+    """
 
     def __init__(
         self,
@@ -74,7 +95,7 @@ class Record:
         inputs: Mapping[str, PathArg] | None = None,
         outputs: Mapping[str, PathArg] | None = None,
         hash_files: bool = True,
-        force_overwrite: bool = False,
+        force_replace: bool = False,
         git_root: PathArg | None = None,
     ) -> None:
         self.directory = resolve_path(directory)
@@ -84,13 +105,8 @@ class Record:
         self._git_root = resolve_path(git_root) if git_root is not None else None
         self._git_info = inspect_git(self._git_root)
 
-        # serialize the provided config to JSON for storage
-        config_json = config.model_dump_json(
-            indent=4, round_trip=True, warnings="error"
-        )
-
         # If a previos record already exists, raise an error to prevent accidental overwrite
-        if not force_overwrite and (
+        if not force_replace and (
             self._config_file.exists() or self._provenance_file.exists()
         ):
             raise FileExistsError(
@@ -137,9 +153,11 @@ class Record:
         # Create the record directory and write the config file only AFTER all verification
         self.directory.mkdir(parents=True, exist_ok=True)
 
-        mode = "w" if force_overwrite else "x"
-        with self._config_file.open(mode, encoding="utf-8") as file:
-            file.write(config_json + "\n")
+        save_config(
+            config,
+            self._config_file,
+            force_replace=force_replace,
+        )
 
         self._save_provenance()
 
@@ -150,7 +168,7 @@ class Record:
             "exit": self._time_exit,
             "duration_seconds": self._duration,
             "status": self.status,
-            "config": self._config_file,
+            "config": str(self._config_file),
             "git": self._git_info,
             "inputs": {name: input.as_dict() for name, input in self._inputs.items()},
             "outputs": {
@@ -178,6 +196,24 @@ class Record:
             raise RuntimeError(f"Cannot modify a record with status '{self.status}'.")
 
     def add_input(self, name: str, path: PathArg) -> None:
+        """
+        Register and immediately inspect an input file.
+
+        The file must already exist. Its size and, by default, SHA-256 digest are
+        written to the provenance record immediately.
+
+        Entire directories are not supported as inputs.
+
+        Args:
+            name: Unique user label used for the input in ``provenance.json``.
+            path: Path to an existing regular file.
+
+        Raises:
+            RuntimeError: If the record is no longer running.
+            ValueError: If ``name`` is already registered or ``path`` is not a
+                regular file.
+            FileNotFoundError: If ``path`` does not exist.
+        """
         self._ensure_running()
 
         # check if already recorded
@@ -198,6 +234,19 @@ class Record:
         self._save_provenance()
 
     def add_output(self, name: str, path: PathArg) -> None:
+        """
+        Declare an output that must exist when the record is finished.
+
+        The output does not need to exist yet. It is inspected at ``finish()``.
+
+        Args:
+            name: Unique user label used for the output in ``provenance.json``.
+            path: Expected path of the output file.
+
+        Raises:
+            RuntimeError: If the record is no longer running.
+            ValueError: If ``name`` is already registered.
+        """
         self._ensure_running()
 
         # check if already recorded
@@ -217,6 +266,19 @@ class Record:
     def finish(
         self,
     ) -> None:
+        """
+        Inspect declared outputs and finalize the record.
+
+        Sets the status to ``"finished"`` if every output exists. If an output
+        is missing, the status is set to ``"incomplete"`` and the error is saved
+        before an exception is raised.
+
+        Raises:
+            RuntimeError: If the record is no longer running.
+            FileNotFoundError: If one or more declared outputs are missing.
+            ValueError: If an output is not a regular file or changes while being
+                hashed.
+        """
         self._ensure_running()
 
         # catch exceptions at inspection to be able to commit the record before re-raising
@@ -250,6 +312,16 @@ class Record:
             self._save_provenance()
 
     def fail(self, exception=None) -> None:
+        """
+        Finalize the record with status ``"failed"``.
+
+        Args:
+            exception: Optional exception whose type and message should be stored
+                in ``provenance.json``.
+
+        Raises:
+            RuntimeError: If the record is no longer running.
+        """
         self._ensure_running()
         self._terminate()
 
@@ -286,17 +358,60 @@ def start_record(
     inputs: Mapping[str, PathArg] | None = None,
     outputs: Mapping[str, PathArg] | None = None,
     hash_files: bool = True,
-    force_overwrite: bool = False,
+    force_replace: bool = False,
     git_root: PathArg | None = None,
 ) -> Record:
-    """Factory initializing a Record instance"""
-    # later potentially inspect metadata first ...
+    """
+    Start a provenance record and write its initial files.
+
+    The configuration is serialized to ``config.json``. Input files are checked
+    immediately, and the Git commit, branch, and working-tree state are captured.
+    Declared outputs are checked only when the record is finished.
+
+    Use this function as a context manager whenever possible, i.e. in a ``with`` block.
+
+    Args:
+        config: Validated Pydantic configuration to store with the run.
+        directory: Directory in which to create ``config.json`` and
+            ``provenance.json``.
+        inputs: Labels mapped to existing input file paths.
+        outputs: Labels mapped to expected output file paths. These files may be
+            created during the run.
+        hash_files: Compute SHA-256 digests for inputs and outputs. File sizes
+            are recorded even when this is false.
+        force_replace: Replace an existing ``config.json`` or
+            ``provenance.json`` in ``directory``. Other files are left untouched.
+        git_root: Directory whose Git repository should be inspected. Defaults
+            to the current working directory. Git fields are null when no
+            repository can be inspected.
+
+    Returns:
+        A running ``Record``.
+
+    Raises:
+        FileExistsError: If a record already exists and ``force_replace`` is
+            false (default).
+        FileNotFoundError: If a declared input does not exist.
+        ValueError: If a declared input is not a regular file or changes while
+            being hashed.
+        OSError: If the record directory or files cannot be written.
+
+    Example:
+        >>> output = Path("results/summary.csv")
+        >>> with start_record(
+        ...     config,
+        ...     directory="runs/experiment-001",
+        ...     inputs={"observations": "data/observations.csv"},
+        ...     outputs={"summary": output},
+        ... ) as record:
+        ...     create_summary(output)
+    """
     return Record(
         config,
         directory=directory,
         inputs=inputs,
         outputs=outputs,
         hash_files=hash_files,
-        force_overwrite=force_overwrite,
+        force_replace=force_replace,
         git_root=git_root,
     )

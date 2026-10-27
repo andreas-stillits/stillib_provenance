@@ -4,25 +4,24 @@ Example config.py file based on Pydantic 2.
 
 - Any Config class inherits from Pydantic's regular BaseModel class.
 
-- Parameters can be declared using regular light weight type hinting or
+- Parameters can be declared using regular light-weight type hinting or
   for a more comprehensive definition and additional constraints on valid inputs
-  using the Field class - see examples
+  using the Field class - see bottom examples
 
-A project can have several config classes for different programs.
-These can be declared separately or alternatively nested into each other.
+A project can have as many config classes as needed. These can be declared separately or nested into each other.
 
 """
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-# Example config class definition
+# Example config class definition - always inherit from BaseModel
 class Config(BaseModel):
     
     # define config behavior - always include this line
     model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True)
 
-    # Examples of minimal declaration:
+    # Examples of minimal declarations:
 
     diffusivity: float = 1.0
     n_steps: int = 1000
@@ -31,10 +30,17 @@ class Config(BaseModel):
 
 
 """
-    # Examples of Field declaration with constraints and additional information
+# Example of Field declaration with constraints and additional information
+class Config(BaseModel):
+
+    # define config behavior - always include this line
+    model_config = ConfigDict(extra="forbid", frozen=True, validate_default=True)
+
+    # Example declarations
+
     diffusivity: float = Field(
         1.0,
-        gt = 0, # enforces that the diffusivity must be grater than zero / a positive number to be acceptable
+        gt = 0, # enforces that the diffusivity must be greater than zero / a positive number to be acceptable
         description = "Diffusion coefficient [µm²/s]"
     )
 
@@ -46,7 +52,7 @@ class Config(BaseModel):
 
     ignore_decay: bool = Field(
         False,
-        description = "Toogle whether diffusing species decay or persist"
+        description = "Flag whether diffusing species decay or persist"
     )
 
     principal_direction: tuple[float, float, float] = Field(
