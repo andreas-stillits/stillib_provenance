@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import Any, Literal, NotRequired, Self, TypedDict
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel
 
@@ -17,7 +17,7 @@ CONFIG_FILE_NAME: str = "config.json"
 PROVENANCE_FILE_NAME: str = "provenance.json"
 # --------------------------------------------
 
-type RecordStatus = Literal[
+RecordStatus = Literal[
     "running",  # all declared input files are present, config is serializable
     "finished",  # all declared outputs files are present (OBS: presence does not imply content)
     "incomplete",  # some declared outputs are not present
@@ -25,7 +25,7 @@ type RecordStatus = Literal[
 ]
 
 
-class ProvenancePayload(TypedDict):
+class _RequiredProvenancePayload(TypedDict):
     schema_version: str
     entry: str
     exit: str | None
@@ -35,8 +35,13 @@ class ProvenancePayload(TypedDict):
     git: GitInspection
     inputs: dict[str, FileInspection]
     outputs: dict[str, FileInspection]
-    annotations: NotRequired[dict[str, Any]]
-    error: NotRequired[dict[str, str]]
+
+
+class ProvenancePayload(_RequiredProvenancePayload, total=False):
+    # non-required fields that may be present in the provenance record
+    # using inheritance rather than typing.NotRequired for python-3.10 compatibility
+    annotations: dict[str, Any]
+    error: dict[str, str]
 
 
 class _FileRecord:
@@ -359,7 +364,7 @@ class Record:
 
     # Context manager support for the Record class, i.e. automatic cleanup without explicit finish/fail calls.
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> Record:
         self._ensure_running()
         return self
 

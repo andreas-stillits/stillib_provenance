@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from os import PathLike
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
+
+ConfigType = TypeVar("ConfigType", bound=BaseModel)
 
 PathArg = str | PathLike[str]
 
@@ -36,7 +38,7 @@ def resolve_path(path: PathArg) -> Path:
     return Path(path).expanduser().resolve()
 
 
-def load_config[ConfigType: BaseModel](
+def load_config(
     ConfigModel: type[ConfigType], source: PathArg | None = None, **overrides: Any
 ) -> ConfigType:
     """
@@ -92,9 +94,7 @@ def load_config[ConfigType: BaseModel](
     )  # supplies default values not present in the JSON source or overrides
 
 
-def update_config[ConfigType: BaseModel](
-    config: ConfigType, **overrides: Any
-) -> ConfigType:
+def update_config(config: ConfigType, **overrides: Any) -> ConfigType:
     """
     Return a validated copy of a configuration with selected values changed.
 

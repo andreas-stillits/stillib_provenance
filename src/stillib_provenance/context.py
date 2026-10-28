@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import subprocess
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
 
@@ -14,7 +14,7 @@ class GitInspection(TypedDict):
 
 def get_utc_now() -> str:
     """Current UTC timestamp in ISO 8601 format."""
-    return datetime.now(UTC).isoformat(timespec="microseconds")
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
 def get_duration(entry: str, exit: str) -> float:
