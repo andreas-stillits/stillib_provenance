@@ -370,7 +370,7 @@ class Record:
             else:
                 self.fail(exception_value)
 
-        return False
+        return False  # do not suppress exceptions, let them propagate to the caller
 
 
 def start_record(
