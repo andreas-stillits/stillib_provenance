@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TypedDict
 
+from .io import PathArg, resolve_path
+
 
 class GitInspection(TypedDict):
+    root: str | None
     commit: str | None
     branch: str | None
     dirty: bool | None
@@ -23,6 +27,18 @@ def get_duration(entry: str, exit: str) -> float:
         (datetime.fromisoformat(exit) - datetime.fromisoformat(entry)).total_seconds(),
         3,
     )
+
+
+def get_entry_point() -> str | None:
+    """Get the entry point of the current Python program."""
+    main = sys.modules.get("__main__")
+    source = getattr(main, "__file__", None)
+
+    if not source or source.startswith("<"):
+        return None
+
+    path = resolve_path(source)
+    return (Path(path.parent.name) / path.name).as_posix()
 
 
 def _git(directory: Path, *args: str) -> str | None:
@@ -42,18 +58,17 @@ def _git(directory: Path, *args: str) -> str | None:
 
 
 def inspect_git(
-    git_root: str | Path | None = None,
+    git_root: PathArg | None = None,
 ) -> GitInspection:
     """Capture Git identity and working-tree state."""
 
-    directory = (
-        Path.cwd() if git_root is None else Path(git_root).expanduser().resolve()
-    )
+    directory = Path.cwd() if git_root is None else resolve_path(git_root)
 
     root = _git(directory, "rev-parse", "--show-toplevel")
 
     if root is None:
         return {
+            "root": None,
             "commit": None,
             "branch": None,
             "dirty": None,
@@ -69,6 +84,7 @@ def inspect_git(
     )
 
     return {
+        "root": str(repo),
         "commit": _git(repo, "rev-parse", "--verify", "HEAD"),
         "branch": _git(repo, "symbolic-ref", "--quiet", "--short", "HEAD"),
         "dirty": (None if status is None else bool(status)),

@@ -2,17 +2,24 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel
 
-from .context import GitInspection, get_duration, get_utc_now, inspect_git
+from .context import (
+    GitInspection,
+    get_duration,
+    get_entry_point,
+    get_utc_now,
+    inspect_git,
+)
 from .inspection import FileInspection, hash_file, inspect_file
 from .io import PathArg, resolve_path, save_config
 
 # HEADER FOR MAGIC STRINGS
 # --------------------------------------------
-RECORD_SCHEMA_VERSION: str = "2.0"
+RECORD_SCHEMA_VERSION: str = "3.0"
 CONFIG_FILE_NAME: str = "config.json"
 PROVENANCE_FILE_NAME: str = "provenance.json"
 # --------------------------------------------
@@ -27,6 +34,7 @@ RecordStatus = Literal[
 
 class _RequiredProvenancePayload(TypedDict):
     schema_version: str
+    entry_point: str | None
     entry: str
     exit: str | None
     duration_seconds: float | None
@@ -40,6 +48,7 @@ class _RequiredProvenancePayload(TypedDict):
 class ProvenancePayload(_RequiredProvenancePayload, total=False):
     # non-required fields that may be present in the provenance record
     # using inheritance rather than typing.NotRequired for python-3.10 compatibility
+    data_root: str | None
     annotations: dict[str, Any]
     error: dict[str, str]
 
@@ -47,6 +56,7 @@ class ProvenancePayload(_RequiredProvenancePayload, total=False):
 class _FileRecord:
     def __init__(self, path: PathArg, hash_content: bool) -> None:
         self.path = resolve_path(path)
+
         self.hash_content = hash_content
 
         self.exists: bool | None = None
@@ -103,15 +113,16 @@ class Record:
         annotations: Mapping[str, Any] | None = None,
         hash_files: bool = True,
         force_replace: bool = False,
-        git_root: PathArg | None = None,
+        git_root: Path | None = None,
+        data_root: Path | None = None,
     ) -> None:
         self.annotations = dict(annotations) if annotations is not None else {}
         self.directory = resolve_path(directory)
         self._config_file = self.directory / CONFIG_FILE_NAME
         self._provenance_file = self.directory / PROVENANCE_FILE_NAME
         self._hash_files = hash_files
-        self._git_root = resolve_path(git_root) if git_root is not None else None
-        self._git_info = inspect_git(self._git_root)
+        self._git_info = inspect_git(git_root)
+        self._data_root = data_root
 
         # If a previos record already exists, raise an error to prevent accidental overwrite
         if not force_replace and (
@@ -121,6 +132,7 @@ class Record:
                 f"Record already exists in {self.directory}. Please choose a different directory or remove the existing record."
             )
 
+        self._entry_point = get_entry_point()
         self._time_entry = get_utc_now()  # record the time of record creation
         self._time_exit: str | None = (
             None  # will be set when the record is finished or failed
@@ -176,6 +188,7 @@ class Record:
     def _as_dict(self) -> ProvenancePayload:
         provenance: ProvenancePayload = {
             "schema_version": RECORD_SCHEMA_VERSION,
+            "entry_point": self._entry_point,
             "entry": self._time_entry,
             "exit": self._time_exit,
             "duration_seconds": self._duration,
@@ -188,6 +201,8 @@ class Record:
             },
             "annotations": self.annotations,
         }
+        if self._data_root is not None:
+            provenance["data_root"] = str(self._data_root)
 
         if self._error is not None:
             provenance["error"] = self._error
@@ -392,6 +407,7 @@ def start_record(
     hash_files: bool = True,
     force_replace: bool = False,
     git_root: PathArg | None = None,
+    data_root: PathArg | None = None,
 ) -> Record:
     """
     Start a provenance record and write its initial files.
@@ -417,6 +433,9 @@ def start_record(
         git_root: Directory whose Git repository should be inspected. Defaults
             to the current working directory. Git fields are null when no
             repository can be inspected.
+        data_root: Directory that should be treated as the root of all input and
+            output paths. Paths are stored relative to this root in the record if specified;
+            otherwise, absolute paths are stored.
 
     Returns:
         A running ``Record``.
@@ -439,6 +458,19 @@ def start_record(
         ... ) as record:
         ...     create_summary(output)
     """
+
+    # verify existence of optional roots and resolve before passing to Record constructor
+
+    if git_root is not None:
+        git_root = resolve_path(git_root)
+        if not git_root.is_dir():
+            raise ValueError(f"Git root {git_root} is not a directory.")
+
+    if data_root is not None:
+        data_root = resolve_path(data_root)
+        if not data_root.is_dir():
+            raise ValueError(f"Data root {data_root} is not a directory.")
+
     return Record(
         config,
         directory=directory,
@@ -448,4 +480,5 @@ def start_record(
         hash_files=hash_files,
         force_replace=force_replace,
         git_root=git_root,
+        data_root=data_root,
     )
