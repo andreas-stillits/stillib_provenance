@@ -7,12 +7,12 @@ from typing import Any, Literal, TypedDict
 from pydantic import BaseModel
 
 from .context import GitInspection, get_duration, get_utc_now, inspect_git
-from .inspection import FileInspection, inspect_file
+from .inspection import FileInspection, hash_file, inspect_file
 from .io import PathArg, resolve_path, save_config
 
 # HEADER FOR MAGIC STRINGS
 # --------------------------------------------
-RECORD_SCHEMA_VERSION: str = "1.0"
+RECORD_SCHEMA_VERSION: str = "2.0"
 CONFIG_FILE_NAME: str = "config.json"
 PROVENANCE_FILE_NAME: str = "provenance.json"
 # --------------------------------------------
@@ -31,7 +31,7 @@ class _RequiredProvenancePayload(TypedDict):
     exit: str | None
     duration_seconds: float | None
     status: RecordStatus
-    config: str
+    config: dict[str, str | None]
     git: GitInspection
     inputs: dict[str, FileInspection]
     outputs: dict[str, FileInspection]
@@ -167,6 +167,10 @@ class Record:
             force_replace=force_replace,
         )
 
+        self._config_digest = (
+            hash_file(self._config_file)["sha256"] if self._hash_files else None
+        )
+
         self._save_provenance()
 
     def _as_dict(self) -> ProvenancePayload:
@@ -176,7 +180,7 @@ class Record:
             "exit": self._time_exit,
             "duration_seconds": self._duration,
             "status": self.status,
-            "config": str(self._config_file),
+            "config": {"path": str(self._config_file), "sha256": self._config_digest},
             "git": self._git_info,
             "inputs": {name: input.as_dict() for name, input in self._inputs.items()},
             "outputs": {

@@ -17,6 +17,41 @@ class FileInspection(TypedDict):
     sha256: str | None
 
 
+class FileHash(TypedDict):
+    size_bytes: int
+    sha256: str
+
+
+def hash_file(path: PathArg, chunk_size: int = STREAMING_CHUNK_SIZE) -> FileHash:
+    """Compute a file's SHA-256 digest using streamed reads."""
+    path = resolve_path(path)
+
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise ValueError(f"Path {path} is not a regular file.")
+
+    digest = hashlib.sha256()
+
+    with path.open("rb") as stream:
+        before = os.fstat(stream.fileno())
+
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"Path {path} is not a regular file.")
+
+        while chunk := stream.read(chunk_size):
+            digest.update(chunk)
+
+        after = os.fstat(stream.fileno())
+
+    if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
+        raise ValueError(f"File {path} changed during hashing.")
+
+    return {
+        "size_bytes": after.st_size,
+        "sha256": digest.hexdigest(),
+    }
+
+
 def inspect_file(
     path: PathArg,
     *,
@@ -46,9 +81,6 @@ def inspect_file(
             "sha256": None,
         }
 
-    if not stat.S_ISREG(info.st_mode):
-        raise ValueError(f"Path {path} is not a regular file.")
-
     if not hash_content:
         return {
             "path": str(path),
@@ -57,25 +89,11 @@ def inspect_file(
             "sha256": None,
         }
 
-    digest = hashlib.sha256()
-
-    with path.open("rb") as stream:
-        before = os.fstat(stream.fileno())
-
-        if not stat.S_ISREG(before.st_mode):
-            raise ValueError(f"Path {path} is not a regular file.")
-
-        while chunk := stream.read(STREAMING_CHUNK_SIZE):
-            digest.update(chunk)
-
-        after = os.fstat(stream.fileno())
-
-    if (before.st_size != after.st_size) or (before.st_mtime != after.st_mtime):
-        raise ValueError(f"File {path} changed during hashing.")
+    hashed = hash_file(path)
 
     return {
         "path": str(path),
         "exists": True,
-        "size_bytes": after.st_size,
-        "sha256": digest.hexdigest(),
+        "size_bytes": hashed["size_bytes"],
+        "sha256": hashed["sha256"],
     }
