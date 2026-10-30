@@ -44,7 +44,7 @@ Different releases can be referenced by modifying the trailing tag.
 The utility offers a `config.py` template you can materialize in your project directory using either:
 1. The terminal:
     ```bash
-    stillib_provenance init "config.py"
+    stillib_provenance init "config.py" 
     ```
 2. Python (notebook or .py file):
     ```python
@@ -53,7 +53,7 @@ The utility offers a `config.py` template you can materialize in your project di
 
     init_config("config.py") # run only once at project start
     ```
-The above example assumes your working directory to be the target destination. Specify the absolute or relative path if it is not.
+The above example assumes your working directory to be the target destination. Specify the path if it is not.
 
 
 ### Config Only
@@ -94,7 +94,8 @@ with start_record(
     config,
     directory = "path/to/target/directory",  # where config.json and provenance.json will be written
     inputs = {"name": "path/to/input", ...},   # declare required input files
-    git_root = "path/to/your/project/code/root", # leave empty if project root is your working directory
+    git_root = "path/to/your/project/code/root", # OPTIONAL: leave empty if project root is your working directory
+    data_root = "path/to/common/root/of/inputs/and/outputs", # OPTIONAL: eases later portability
 ) as record:
     # AT ENTRY:
     #   File inspection: existence check on all inputs and SHA256 hashing for content identity
@@ -139,6 +140,7 @@ record = start_record(
     directory = "path/to/target/directory",  # where config.json and provenance.json will be written
     inputs = {"name": "path/to/input", ...},   # declare required input files
     git_root = "path/to/your/project/code/root", # leave empty if project root is your working directory
+    data_root = "path/to/common/root/of/inputs/and/outputs", # OPTIONAL: eases later portability
 )
 
 try:
@@ -153,32 +155,37 @@ else:
 ```
 A simpler implementation is to just put `record.finish()` at the end of your program. However, if any exceptions occur they will not be written to the recorded provenance.json file which will be left on disk with status "running". 
 
-### Example provenance.json - schema-version 1.0
+### Example provenance.json - schema-version 3.0
 
 ```JSON
 {
-    "schema_version": "1.0",
+    "schema_version": "3.0",
+    "entry_point": "project/processing.py",
     "entry": "2026-10-28T10:33:59.224520+00:00",
     "exit": "2026-10-28T10:33:59.225701+00:00",
     "duration_seconds": 0.001,
     "status": "finished",
-    "config": "/home/andreasstillits/coding/tools/test/data/run/config.json",
+    "config": {
+        "path": "/home/user/project/data/run/config.json",
+        "sha256": "b909b65cba86269dc53ed6d14c8e459b78af53c9cb48841a996eec98e40fd40a",
+    },
     "git": {
+        "path": "home/user/project",
         "commit": "1b12dd92e45eb7bf6b2c0a4b8f96ebe025162fab",
         "branch": "main",
         "dirty": false
     },
     "inputs": {
         "signal": {
-            "path": "/home/andreasstillits/coding/tools/test/data/input.txt",
+            "path": "/home/user/project/data/input.txt",
             "exists": true,
             "size_bytes": 9,
             "sha256": "1307990e6ba5ca145eb35e99182a9bec46531bc54ddf656a602c780fa0240dee"
         }
     },
     "outputs": {
-        "data": {
-            "path": "/home/andreasstillits/coding/tools/test/data/run/output.npy",
+        "processed": {
+            "path": "/home/user/project/data/run/output.npy",
             "exists": true,
             "size_bytes": 152,
             "sha256": "f9903acaeea88e7642e9820968f19d2c30dabf7aeb913e939bc23dc2f27be854"
@@ -187,7 +194,8 @@ A simpler implementation is to just put `record.finish()` at the end of your pro
     "annotations": {
         "mean": 2.0,
         "std": 1.0
-    }
+    },
+    "data_root": "/home/user/project/data",
 }
 
 ```
