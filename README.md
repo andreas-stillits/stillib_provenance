@@ -32,7 +32,7 @@ If your project contains a `pyproject.toml` file, you can add the utility under 
 [project]
 # other settings ...
 dependencies = [
-    "stillib_provenance @ git+https://github.com/andreas-stillits/stillib_provenance.git@v0.6.1",
+    "stillib_provenance @ git+https://github.com/andreas-stillits/stillib_provenance.git@v0.8.1",
 ]
 ```
 Different releases can be referenced by modifying the trailing tag.
